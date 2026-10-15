@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "DigUp for Google",
+  "short_name": "DigUp",
+  "description": "Search your Google Drive and Gmail by what's in them: the slide, the sheet tab, the doc section, the PDF page, the email, the moment in a video.",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmeqGpQKBiJEKnQMVjKQINhLwLfOowwiCvKxtKtjj1DZcnyv8var+s8MBjpte7qI7NvC8jmoVbkcLliyDsJzABK5v8kynDfx2O/TXuVDuUKyGyCFKtGPPmTqzO0DKdI0j6AfjHC136onW5XFAkbQccUvrP+ExRBXN5k0OTv3OwKVmHmjedmsRUu7S7kBYG4/Qr60knpxG1F8+uEAtaY01YIG8KfUUW7BBOYD0U2ZMr2bP4gpJsS0auSfD3EweAdwMcggSfBI0jt+JFBlws+FVoXN9gOM+saXThbO0UlgX1/wPEP1V2oQLO9lqBJzWrDml454MgXD2ybwgBw+HzTbUgQIDAQAB",
+  "minimum_chrome_version": "135",
+  "icons": { "128": "icon.png" },
+  "action": { "default_popup": "popup.html", "default_title": "DigUp" },
+  "options_page": "options.html",
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": ["identity", "offscreen", "storage", "unlimitedStorage", "alarms"],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://docs.googleapis.com/*",
+    "https://sheets.googleapis.com/*",
+    "https://slides.googleapis.com/*",
+    "https://gmail.googleapis.com/*",
+    "https://*.googleusercontent.com/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*"
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+Space", "mac": "Command+Shift+Space" },
+      "description": "Search Drive and Gmail"
+    }
+  },
+  "omnibox": { "keyword": "dig" },
+  "oauth2": {
+    "client_id": "REPLACE_WITH_OAUTH_WEB_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/gmail.readonly"]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

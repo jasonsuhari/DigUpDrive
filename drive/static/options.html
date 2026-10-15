@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>DigUp settings</title>
+<link rel="stylesheet" href="ui.css">
+<body>
+<main class="page">
+  <h1>DigUp for Google</h1>
+  <p>Search your Drive and Gmail by what's in them. The model runs in Chrome on your computer, and the index stays in this browser. Nothing is sent anywhere else.</p>
+
+  <h2>Account</h2>
+  <p id="account">Checking…</p>
+  <p><button id="sign-in" class="button">Sign in with Google</button> <button id="sign-out" class="button quiet" hidden>Sign out</button></p>
+
+  <h2>What to search</h2>
+  <label><input type="checkbox" id="drive"> Google Drive: your files</label>
+  <label><input type="checkbox" id="sharedWithMe"> Files shared with you</label>
+  <label><input type="checkbox" id="sharedDrives"> Shared drives</label>
+  <label><input type="checkbox" id="gmail"> Gmail</label>
+  <label>Emails matching <input type="text" id="gmailQuery" placeholder="newer_than:1y"></label>
+  <p>Uses Gmail's search syntax. <code>newer_than:1y</code> is the last year; leave it empty for all mail.</p>
+  <p><button id="save" class="button">Save</button></p>
+
+  <h2>Index</h2>
+  <p id="progress-text">…</p>
+  <progress id="progress" value="0" max="1" hidden></progress>
+  <p id="download-text" hidden></p>
+  <p><button id="sync" class="button quiet">Check for changes now</button> <button id="pause" class="button quiet">Pause</button> <button id="reset" class="button quiet">Delete the index</button></p>
+  <h2 id="failures-title" hidden>Couldn't read</h2>
+  <ul id="failures" class="failures"></ul>
+
+  <h2>Shortcut</h2>
+  <p>Press <kbd id="shortcut">⌘⇧Space</kbd> in Chrome to search, or type <code>dig</code> and a space in the address bar. Change it at <code>chrome://extensions/shortcuts</code>.</p>
+</main>
+<script type="module" src="options.js"></script>
+</body>
+</html>
