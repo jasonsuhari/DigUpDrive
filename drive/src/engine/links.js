@@ -7,21 +7,21 @@ function url(base, params, account, hash = "") {
   return out.toString() + hash;
 }
 
+const GOOGLE = "application/vnd.google-apps.";
+
+const DEEP_LINKS = {
+  [`${GOOGLE}document`]: (id, loc, account) =>
+    url(`https://docs.google.com/document/d/${id}/edit`, { tab: loc.tab }, account, loc.heading ? `#heading=${loc.heading}` : ""),
+  [`${GOOGLE}spreadsheet`]: (id, loc, account) =>
+    url(`https://docs.google.com/spreadsheets/d/${id}/edit`, { gid: loc.gid }, account, `#gid=${loc.gid}${loc.range ? `&range=${loc.range}` : ""}`),
+  [`${GOOGLE}presentation`]: (id, loc, account) =>
+    url(`https://docs.google.com/presentation/d/${id}/edit`, {}, account, `#slide=id.${loc.slide}`),
+};
+
 export function openTarget(item, segment, account) {
   const loc = segment?.loc;
-  const id = item.ref?.fileId;
-  if (item.source === "drive" && loc) {
-    if (loc.tab || loc.heading) {
-      return url(`https://docs.google.com/document/d/${id}/edit`, { tab: loc.tab }, account, loc.heading ? `#heading=${loc.heading}` : "");
-    }
-    if (loc.gid !== undefined) {
-      const range = loc.range ? `&range=${loc.range}` : "";
-      return url(`https://docs.google.com/spreadsheets/d/${id}/edit`, { gid: loc.gid }, account, `#gid=${loc.gid}${range}`);
-    }
-    if (typeof loc.slide === "string") {
-      return url(`https://docs.google.com/presentation/d/${id}/edit`, {}, account, `#slide=id.${loc.slide}`);
-    }
-  }
+  const deepLink = DEEP_LINKS[item.mimeType];
+  if (deepLink && loc) return deepLink(item.ref.fileId, loc, account);
   if (PREVIEWED.has(item.kind) && (loc?.page || loc?.t !== undefined)) return previewURL(item, loc);
   if (!item.link) return null;
   return item.source === "drive" ? url(item.link, {}, account) : item.link;
@@ -33,3 +33,5 @@ export function previewURL(item, loc) {
   if (loc?.t !== undefined) params.set("t", loc.t.toFixed(1));
   return chrome.runtime.getURL(`preview.html?${params}`);
 }
+
+export const folderId = (text) => /\/folders\/([\w-]+)/.exec(text)?.[1] ?? text.trim();

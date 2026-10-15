@@ -30,7 +30,7 @@
   },
   "omnibox": { "keyword": "dig" },
   "oauth2": {
-    "client_id": "REPLACE_WITH_OAUTH_WEB_CLIENT_ID.apps.googleusercontent.com",
+    "client_id": "925167868507-kiq8s7uee2r5v1pveegh3qjv9ke64k96.apps.googleusercontent.com",
     "scopes": ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/gmail.readonly"]
   },
   "content_security_policy": {

@@ -41,8 +41,9 @@ export function readerOf(mimeType) {
 const KIND = { doc: "doc", docx: "doc", text: "doc", sheet: "sheet", xlsx: "sheet", slides: "slides", pptx: "slides", drawing: "image" };
 export const kindOf = (mimeType) => KIND[readerOf(mimeType)] ?? readerOf(mimeType);
 
-export function wanted(file, settings) {
+export function wanted(file, settings, tree) {
   if (file.trashed || SKIPPED.has(file.mimeType)) return false;
+  if (settings.folders.length) return tree.isInside(file, settings.folders);
   if (file.driveId) return settings.sharedDrives;
   return file.ownedByMe || settings.sharedWithMe;
 }
@@ -102,23 +103,25 @@ export async function listChanges(settings, pageToken) {
   return { changes, pageToken: newStartPageToken };
 }
 
-export function folderPaths(folders) {
+export function folderTree(folders) {
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
-  const cache = new Map();
-  const path = (id, seen = new Set()) => {
-    if (cache.has(id)) return cache.get(id);
-    const folder = byId.get(id);
-    if (!folder || seen.has(id)) return "";
-    seen.add(id);
-    const parent = folder.parents?.[0] ? path(folder.parents[0], seen) : "";
-    const out = parent ? `${parent} / ${folder.name}` : folder.name;
-    cache.set(id, out);
+  const paths = new Map();
+  const ancestors = (id) => {
+    const out = [];
+    for (let at = id; at && byId.has(at) && !out.includes(at); at = byId.get(at).parents?.[0]) out.push(at);
     return out;
   };
-  return (file) => (file.parents?.[0] ? path(file.parents[0]) : "");
+  const path = (id) => {
+    if (!paths.has(id)) paths.set(id, ancestors(id).reverse().map((at) => byId.get(at).name).join(" / "));
+    return paths.get(id);
+  };
+  return {
+    pathOf: (file) => (file.parents?.[0] ? path(file.parents[0]) : ""),
+    isInside: (file, roots) => (file.parents ?? []).some((parent) => ancestors(parent).some((id) => roots.includes(id)) || roots.includes(parent)),
+  };
 }
 
-export function toItem(file, pathOf) {
+export function toItem(file, tree) {
   return {
     id: `drive:${file.id}`,
     source: "drive",
@@ -126,7 +129,7 @@ export function toItem(file, pathOf) {
     kind: kindOf(file.mimeType),
     mimeType: file.mimeType,
     name: file.name,
-    path: pathOf(file),
+    path: tree.pathOf(file),
     modified: Date.parse(file.modifiedTime),
     version: String(file.version ?? file.modifiedTime),
     size: Number(file.size ?? 0),
@@ -168,18 +171,4 @@ export async function readDriveItem(item) {
 export async function account() {
   const { user } = await request(`${APIS.drive}/drive/v3/about?${query({ fields: "user(emailAddress)" })}`);
   return user.emailAddress;
-}
-
-export async function fullTextMatches(terms, settings) {
-  if (!terms.length) return [];
-  const clauses = terms.map((term) => `fullText contains '${term.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`);
-  const page = await request(
-    `${APIS.drive}/drive/v3/files?${query({
-      ...listParams(settings),
-      q: `trashed = false and ${clauses.join(" and ")}`,
-      pageSize: 100,
-      fields: "files(id)",
-    })}`,
-  );
-  return page.files.map((file) => `drive:${file.id}`);
 }

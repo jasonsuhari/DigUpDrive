@@ -3,7 +3,9 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } f
 import { join } from "node:path";
 
 const test = process.argv.includes("--test");
-const out = test ? "dist-test" : "dist";
+const live = process.argv.includes("--live");
+const dev = test || live;
+const out = test ? "dist-test" : live ? "dist-live" : "dist";
 const fakeDrive = process.env.DIGUP_FAKE_DRIVE ?? "http://127.0.0.1:8765";
 
 const apis = test
@@ -25,11 +27,11 @@ await esbuild.build({
   format: "esm",
   target: "chrome135",
   outdir: out,
-  minify: !test,
-  sourcemap: test ? "inline" : false,
+  minify: !dev,
+  sourcemap: dev ? "inline" : false,
   define: {
     __APIS__: JSON.stringify(apis),
-    __TEST_TOKEN__: JSON.stringify(test ? "test-token" : null),
+    __DEV__: JSON.stringify(dev),
   },
   logLevel: "warning",
 });
@@ -44,7 +46,6 @@ cpSync("node_modules/pdfjs-dist/build/pdf.worker.min.mjs", join(out, "pdf.worker
 for (const folder of ["cmaps", "standard_fonts", "wasm"]) cpSync(`node_modules/pdfjs-dist/${folder}`, join(out, "pdfjs", folder), { recursive: true });
 
 const manifest = JSON.parse(readFileSync("static/manifest.json", "utf8"));
-if (process.env.DIGUP_OAUTH_CLIENT_ID) manifest.oauth2.client_id = process.env.DIGUP_OAUTH_CLIENT_ID;
 if (test) manifest.host_permissions.push(`${fakeDrive}/*`);
 writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2));
 console.log(`built ${out}/`);

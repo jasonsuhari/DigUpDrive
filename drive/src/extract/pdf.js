@@ -1,5 +1,5 @@
 import * as pdfjs from "pdfjs-dist";
-import { rawImage, thumbnail, BUDGET } from "./media.js";
+import { rawImage, thumbnail, BUDGET, Unreadable } from "./media.js";
 
 const MAX_PAGES = 2000;
 const MIN_PAGE_TEXT = 200;
@@ -44,7 +44,9 @@ async function pageText(page) {
 }
 
 export async function pdfPieces(blob) {
-  const pdf = await openPDF(new Uint8Array(await blob.arrayBuffer()));
+  const pdf = await openPDF(new Uint8Array(await blob.arrayBuffer())).catch((error) => {
+    throw error.name === "PasswordException" ? new Unreadable("the PDF has a password") : new Unreadable(`not a readable PDF (${error.message})`);
+  });
   const total = pdf.numPages;
   const pieces = [];
   for (let number = 1; number <= Math.min(total, MAX_PAGES); number++) {

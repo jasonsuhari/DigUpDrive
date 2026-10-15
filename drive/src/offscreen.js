@@ -3,8 +3,6 @@ import { Indexer, settings } from "./engine/indexer.js";
 import { embedQuery, releaseQueryModel, reportDownloads, loaded } from "./engine/model.js";
 import { getMeta, setMeta, getItem, itemsInState, wipe } from "./engine/store.js";
 import { openTarget } from "./engine/links.js";
-import { terms } from "./engine/text.js";
-import { fullTextMatches } from "./sources/drive.js";
 
 const QUERY_MODEL_IDLE_MS = 5 * 60 * 1000;
 
@@ -35,13 +33,9 @@ const handlers = {
     const text = q.trim();
     if (!text) return { hits: [] };
     const started = performance.now();
-    const current = await settings();
-    const [vector, allWordsIn] = await Promise.all([
-      embedQuery(text),
-      current.drive ? fullTextMatches(terms(text), current).catch(() => []) : [],
-    ]);
+    const vector = await embedQuery(text);
     touchQueryModel();
-    const hits = await searcher.search(text, vector, { kinds, prefixLast, allWordsIn });
+    const hits = await searcher.search(text, vector, { kinds, prefixLast });
     const account = await getMeta("account");
     return {
       ms: Math.round(performance.now() - started),
@@ -59,6 +53,9 @@ const handlers = {
       settings: await settings(),
       vectors: searcher.vectorCount,
       items: searcher.items.size,
+      pending: Object.fromEntries(
+        ["drive", "gmail"].map((source) => [source, [...searcher.items.values()].filter((item) => item.source === source && item.state === "pending").length]),
+      ),
       models: loaded(),
       failed: (await itemsInState("failed")).slice(0, 50).map((item) => ({ name: item.name, detail: item.detail, kind: item.kind })),
     };

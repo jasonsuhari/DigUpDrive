@@ -1,9 +1,10 @@
 import * as drive from "../sources/drive.js";
 import * as gmail from "../sources/gmail.js";
 import { GoogleError } from "../google/api.js";
+import { Unreadable } from "../extract/media.js";
 import { embedTexts, embedImages, embedAudio, prompts, releaseIndexingModel, VECTOR_VERSION } from "./model.js";
 import { hasWords } from "./text.js";
-import { getMeta, setMeta, allItems, getItem, itemsInState, putItems, removeItems, replaceSegments } from "./store.js";
+import { getMeta, setMeta, allItems, putItems, removeItems, replaceSegments } from "./store.js";
 
 export const DEFAULT_SETTINGS = {
   drive: true,
@@ -11,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   sharedDrives: false,
   gmail: true,
   gmailQuery: "newer_than:1y",
+  folders: [],
 };
 
 const MAX_EMBED_CHARS = 4000;
@@ -21,7 +23,7 @@ export async function settings() {
   return { ...DEFAULT_SETTINGS, ...(await getMeta("settings")) };
 }
 
-const driveScope = (s) => JSON.stringify([s.sharedWithMe, s.sharedDrives]);
+const driveScope = (s) => JSON.stringify([s.sharedWithMe, s.sharedDrives, s.folders]);
 
 export class Indexer {
   constructor(searcher, notify) {
@@ -48,6 +50,7 @@ export class Indexer {
     const current = await settings();
     if ((await getMeta("vectorVersion")) !== VECTOR_VERSION) await this.requeueEverything();
     if (!(await getMeta("account"))) await setMeta("account", await drive.account());
+    await this.retryFailed();
     if (current.drive) await this.syncDrive(current);
     else await this.dropSource("drive");
     if (current.gmail) await this.syncGmail(current);
@@ -56,21 +59,32 @@ export class Indexer {
     this.report({ phase: "idle", lastSync: Date.now(), current: null });
   }
 
+  async save(items) {
+    if (!items.length) return;
+    await putItems(items);
+    for (const item of items) this.searcher.setItem(item);
+  }
+
+  async retryFailed() {
+    const failed = [...this.searcher.items.values()].filter((item) => item.state === "failed").map((item) => ({ ...item, state: "pending" }));
+    await this.save(failed);
+  }
+
   async requeueEverything() {
-    const items = await allItems();
-    await putItems(items.map((item) => ({ ...item, state: "pending" })));
+    const items = (await allItems()).map((item) => ({ ...item, state: "pending" }));
+    await this.save(items);
     await setMeta("vectorVersion", VECTOR_VERSION);
   }
 
   async dropSource(source) {
-    const ids = (await allItems()).filter((item) => item.source === source).map((item) => item.id);
+    const ids = [...this.searcher.items.values()].filter((item) => item.source === source).map((item) => item.id);
     if (ids.length) await this.remove(ids);
     await setMeta(`${source}.cursor`, null);
   }
 
   async remove(ids) {
     const parents = new Set(ids);
-    const children = (await allItems()).filter((item) => parents.has(item.parent)).map((item) => item.id);
+    const children = [...this.searcher.items.values()].filter((item) => parents.has(item.parent)).map((item) => item.id);
     const doomed = [...new Set([...ids, ...children])];
     const removed = await removeItems(doomed);
     for (const id of doomed) this.searcher.removeItem(id, removed.get(id) ?? []);
@@ -79,12 +93,11 @@ export class Indexer {
   async queue(items) {
     const changed = [];
     for (const item of items) {
-      const stored = await getItem(item.id);
+      const stored = this.searcher.items.get(item.id);
       if (stored && stored.indexedVersion === item.version && stored.state !== "pending") continue;
       changed.push({ ...stored, ...item, state: "pending", queued: Date.now() });
     }
-    if (changed.length) await putItems(changed);
-    for (const item of changed) this.searcher.setItem(item);
+    await this.save(changed);
     return changed.length;
   }
 
@@ -93,22 +106,22 @@ export class Indexer {
     if (!cursor || cursor.scope !== driveScope(current)) return this.listDrive(current);
     const { changes, pageToken } = await drive.listChanges(current, cursor.pageToken);
     const folders = { ...cursor.folders };
+    for (const { file, removed } of changes) {
+      if (file?.mimeType !== drive.FOLDER) continue;
+      if (removed || file.trashed) delete folders[file.id];
+      else folders[file.id] = { id: file.id, name: file.name, parents: file.parents };
+    }
+    const tree = drive.folderTree(Object.values(folders));
     const removed = [];
     const upserts = [];
     for (const change of changes) {
-      const file = change.file;
-      if (file?.mimeType === drive.FOLDER) {
-        if (change.removed || file.trashed) delete folders[file.id];
-        else folders[file.id] = { id: file.id, name: file.name, parents: file.parents };
-        continue;
-      }
-      if (change.removed || !file || !drive.wanted(file, current)) removed.push(`drive:${change.fileId}`);
-      else upserts.push(file);
+      if (change.file?.mimeType === drive.FOLDER) continue;
+      if (change.removed || !change.file || !drive.wanted(change.file, current, tree)) removed.push(`drive:${change.fileId}`);
+      else upserts.push(change.file);
     }
-    const pathOf = drive.folderPaths(Object.values(folders));
-    await this.queue(upserts.map((file) => drive.toItem(file, pathOf)));
+    await this.queue(upserts.map((file) => drive.toItem(file, tree)));
     const gone = [];
-    for (const id of removed) if (await getItem(id)) gone.push(id);
+    for (const id of removed) if (this.searcher.items.has(id)) gone.push(id);
     if (gone.length) await this.remove(gone);
     await setMeta("drive.cursor", { scope: cursor.scope, pageToken, folders });
   }
@@ -118,11 +131,11 @@ export class Indexer {
     const pageToken = await drive.startPageToken(current);
     const files = await drive.listFiles(current, (listed) => this.report({ listed }));
     const folders = files.filter((file) => file.mimeType === drive.FOLDER);
-    const pathOf = drive.folderPaths(folders);
-    const items = files.filter((file) => drive.wanted(file, current)).map((file) => drive.toItem(file, pathOf));
+    const tree = drive.folderTree(folders);
+    const items = files.filter((file) => drive.wanted(file, current, tree)).map((file) => drive.toItem(file, tree));
     await this.queue(items);
     const keep = new Set(items.map((item) => item.id));
-    const stale = (await allItems()).filter((item) => item.source === "drive" && !keep.has(item.id)).map((item) => item.id);
+    const stale = [...this.searcher.items.values()].filter((item) => item.source === "drive" && !keep.has(item.id)).map((item) => item.id);
     if (stale.length) await this.remove(stale);
     await setMeta("drive.cursor", {
       scope: driveScope(current),
@@ -143,7 +156,7 @@ export class Indexer {
     }
     await this.queue(history.added.map(gmail.messageItem));
     const gone = [];
-    for (const id of history.deleted) if (await getItem(`gmail:${id}`)) gone.push(`gmail:${id}`);
+    for (const id of history.deleted) if (this.searcher.items.has(`gmail:${id}`)) gone.push(`gmail:${id}`);
     if (gone.length) await this.remove(gone);
     await setMeta("gmail.cursor", { ...cursor, historyId: history.historyId });
   }
@@ -152,18 +165,27 @@ export class Indexer {
     this.report({ phase: "listing", source: "gmail", listed: 0 });
     const { emailAddress, historyId } = await gmail.profile();
     const ids = await gmail.listMessages(current, (listed) => this.report({ listed }));
-    const fresh = [];
-    for (const id of ids) if (!(await getItem(`gmail:${id}`))) fresh.push(gmail.messageItem(id));
-    await putItems(fresh.map((item, index) => ({ ...item, state: "pending", queued: index })));
-    for (const item of fresh) this.searcher.setItem(item);
+    const fresh = ids
+      .filter((id) => !this.searcher.items.has(`gmail:${id}`))
+      .map((id, index) => ({ ...gmail.messageItem(id), state: "pending", queued: index }));
+    await this.save(fresh);
     const keep = new Set(ids.map((id) => `gmail:${id}`));
-    const stale = (await allItems()).filter((item) => item.source === "gmail" && !item.parent && !keep.has(item.id)).map((item) => item.id);
+    const stale = [...this.searcher.items.values()].filter((item) => item.source === "gmail" && !item.parent && !keep.has(item.id)).map((item) => item.id);
     if (stale.length) await this.remove(stale);
     await setMeta("gmail.cursor", { query: current.gmailQuery, historyId, account: emailAddress });
   }
 
-  async next() {
-    const pending = await itemsInState("pending");
+  counts() {
+    const tally = { total: 0, pending: 0, done: 0, failed: 0 };
+    for (const item of this.searcher.items.values()) {
+      tally.total++;
+      tally[item.state === "pending" ? "pending" : item.state === "failed" ? "failed" : "done"]++;
+    }
+    return tally;
+  }
+
+  next() {
+    const pending = [...this.searcher.items.values()].filter((item) => item.state === "pending");
     if (!pending.length) return null;
     const bySource = { drive: [], gmail: [] };
     for (const item of pending) bySource[item.source].push(item);
@@ -174,21 +196,15 @@ export class Indexer {
   }
 
   async drain() {
-    const counts = async () => {
-      const items = await allItems();
-      const tally = { total: items.length, pending: 0, done: 0, failed: 0 };
-      for (const item of items) tally[item.state === "pending" ? "pending" : item.state === "failed" ? "failed" : "done"]++;
-      return tally;
-    };
     let item;
-    this.report({ phase: "indexing", ...(await counts()) });
-    while (!this.paused && (item = await this.next())) {
+    this.report({ phase: "indexing", ...this.counts() });
+    while (!this.paused && (item = this.next())) {
       this.report({ current: item.name });
       await this.index(item);
-      this.report({ phase: "indexing", ...(await counts()) });
+      this.report({ phase: "indexing", ...this.counts() });
     }
     await releaseIndexingModel();
-    this.report(await counts());
+    this.report(this.counts());
   }
 
   async read(item) {
@@ -209,9 +225,10 @@ export class Indexer {
       if (read.children?.length) await this.queue(read.children);
       segments = await this.embed(item, read.pieces);
     } catch (error) {
-      failure = error;
-      segments = [];
       if (error instanceof GoogleError && error.status === 401) throw error;
+      if (error instanceof Unreadable) read = { pieces: [], detail: `${error.message}; found by name only` };
+      else failure = error;
+      segments = [];
     } finally {
       read.close?.();
     }

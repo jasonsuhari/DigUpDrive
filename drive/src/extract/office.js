@@ -1,6 +1,7 @@
 import { unzipSync, strFromU8 } from "fflate";
 import { chunks } from "../engine/text.js";
 import { sheetPieces } from "./sheets.js";
+import { Unreadable } from "./media.js";
 
 const xml = (bytes) => new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
 const local = (node, name) => [...node.getElementsByTagName("*")].filter((child) => child.localName === name);
@@ -9,7 +10,7 @@ async function unzip(blob) {
   try {
     return unzipSync(new Uint8Array(await blob.arrayBuffer()));
   } catch {
-    throw new Error("not a readable Office file");
+    throw new Unreadable("not a readable Office file");
   }
 }
 
@@ -23,7 +24,7 @@ export function sectionPieces(sections, describe) {
 export async function docxPieces(blob) {
   const files = await unzip(blob);
   const document = files["word/document.xml"];
-  if (!document) throw new Error("no word/document.xml");
+  if (!document) throw new Unreadable("not a readable Word file");
   const sections = [{ heading: null, text: "" }];
   for (const paragraph of local(xml(document), "p")) {
     const style = local(paragraph, "pStyle")[0]?.getAttribute("w:val") ?? "";
@@ -40,7 +41,7 @@ export async function pptxPieces(blob) {
   const files = await unzip(blob);
   const presentation = files["ppt/presentation.xml"];
   const relations = files["ppt/_rels/presentation.xml.rels"];
-  if (!presentation || !relations) throw new Error("no ppt/presentation.xml");
+  if (!presentation || !relations) throw new Unreadable("not a readable PowerPoint file");
   const targets = Object.fromEntries(
     local(xml(relations), "Relationship").map((node) => [node.getAttribute("Id"), node.getAttribute("Target")]),
   );
@@ -71,7 +72,7 @@ export async function xlsxPieces(blob) {
   const files = await unzip(blob);
   const workbook = files["xl/workbook.xml"];
   const relations = files["xl/_rels/workbook.xml.rels"];
-  if (!workbook || !relations) throw new Error("no xl/workbook.xml");
+  if (!workbook || !relations) throw new Unreadable("not a readable Excel file");
   const strings = files["xl/sharedStrings.xml"]
     ? local(xml(files["xl/sharedStrings.xml"]), "si").map((si) => local(si, "t").map((t) => t.textContent).join(""))
     : [];

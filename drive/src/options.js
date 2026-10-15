@@ -1,4 +1,5 @@
 import { background, engine, onEngine, element, formatCount } from "./ui/common.js";
+import { folderId } from "./engine/links.js";
 
 const $ = (id) => document.getElementById(id);
 const FIELDS = ["drive", "sharedWithMe", "sharedDrives", "gmail"];
@@ -35,12 +36,14 @@ async function refresh() {
   const reply = await engine("status");
   for (const field of FIELDS) $(field).checked = reply.settings[field];
   $("gmailQuery").value = reply.settings.gmailQuery;
+  $("folders").value = reply.settings.folders.map((id) => `https://drive.google.com/drive/folders/${id}`).join(" ");
   showStatus(reply);
 }
 
 $("save").addEventListener("click", async () => {
   const settings = Object.fromEntries(FIELDS.map((field) => [field, $(field).checked]));
   settings.gmailQuery = $("gmailQuery").value.trim();
+  settings.folders = $("folders").value.split(/\s+/).filter(Boolean).map(folderId);
   await engine("saveSettings", { settings });
   refresh();
 });

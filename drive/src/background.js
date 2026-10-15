@@ -1,4 +1,4 @@
-/* global __TEST_TOKEN__ */
+/* global __DEV__ */
 const SYNC_MINUTES = 15;
 const TOKEN_MARGIN_MS = 60 * 1000;
 
@@ -60,8 +60,15 @@ async function signIn(interactive) {
   return token;
 }
 
+async function devToken() {
+  if (!__DEV__) return null;
+  const { devToken } = await chrome.storage.local.get("devToken");
+  return devToken ?? null;
+}
+
 async function token({ force = false } = {}) {
-  if (__TEST_TOKEN__) return { token: __TEST_TOKEN__ };
+  const injected = await devToken();
+  if (injected) return { token: injected };
   const { token: cached } = await chrome.storage.session.get("token");
   if (!force && cached && cached.expires - TOKEN_MARGIN_MS > Date.now()) return { token: cached.value, scopes: cached.scopes };
   const { auth } = await chrome.storage.local.get("auth");
@@ -89,7 +96,6 @@ const handlers = {
     return { signedOut: true };
   },
   async account() {
-    if (__TEST_TOKEN__) return { account: "test@example.com" };
     const { auth } = await chrome.storage.local.get("auth");
     return { account: auth?.account ?? null };
   },
@@ -107,7 +113,7 @@ chrome.runtime.onMessage.addListener((message, _sender, reply) => {
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   chrome.alarms.create("sync", { periodInMinutes: SYNC_MINUTES });
-  if (reason === "install" && !__TEST_TOKEN__) chrome.runtime.openOptionsPage();
+  if (reason === "install" && !__DEV__) chrome.runtime.openOptionsPage();
 });
 
 chrome.runtime.onStartup.addListener(() => engine({ op: "sync" }));

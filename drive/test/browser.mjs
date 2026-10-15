@@ -13,7 +13,7 @@ function chromePath() {
   return computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir: CACHE });
 }
 
-export async function launch({ extension = "dist-test", profile = join(CACHE, "profile"), headless = true } = {}) {
+export async function launch({ extension = "dist-test", profile = join(CACHE, "profile"), headless = true, token = "test-token" } = {}) {
   const path = resolve(extension);
   const browser = await puppeteer.launch({
     executablePath: chromePath(),
@@ -30,6 +30,7 @@ export async function launch({ extension = "dist-test", profile = join(CACHE, "p
   const page = await browser.newPage();
   page.on("console", (message) => process.env.DIGUP_VERBOSE && console.log(`[page] ${message.text()}`));
   await page.goto(`chrome-extension://${EXTENSION_ID}/options.html`);
+  await page.evaluate((devToken) => chrome.storage.local.set({ devToken }), token);
   const engine = (op, extra = {}) =>
     page.evaluate(
       (message) => chrome.runtime.sendMessage({ to: "background", op: "engine", message }),

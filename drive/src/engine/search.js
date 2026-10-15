@@ -118,7 +118,7 @@ export class Searcher {
     return out;
   }
 
-  async search(text, queryVector, { kinds = null, limit = 30, prefixLast = false, allWordsIn = [] } = {}) {
+  async search(text, queryVector, { kinds = null, limit = 30, prefixLast = false } = {}) {
     const allowed = (itemId) => {
       const item = this.items.get(itemId);
       return item && (!kinds || kinds.includes(item.kind));
@@ -154,7 +154,6 @@ export class Searcher {
         }
       }
     });
-    for (const id of allWordsIn) if (allowed(id)) coverage.set(id, 1);
     for (const [segmentId, count] of matchedTerms) {
       const { item, kind } = this.segments.get(segmentId);
       const current = keywordSegment.get(item);
