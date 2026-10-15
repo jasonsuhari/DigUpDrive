@@ -53,6 +53,7 @@ const handlers = {
       settings: await settings(),
       vectors: searcher.vectorCount,
       items: searcher.items.size,
+      counts: indexer.counts(),
       pending: Object.fromEntries(
         ["drive", "gmail"].map((source) => [source, [...searcher.items.values()].filter((item) => item.source === source && item.state === "pending").length]),
       ),

@@ -193,7 +193,6 @@ export class Searcher {
         cosine: semantic?.cosine ?? null,
         words: coverage.get(id) ?? 0,
         strong: top > 0 && score >= top * STRONG_RATIO,
-        quoteWords: keyword?.segment === segmentId,
       });
     }
     await this.attachExcerpts(hits, terms);
@@ -206,8 +205,7 @@ export class Searcher {
     for (const hit of hits) {
       const segment = byId.get(hit.segmentId);
       if (!segment?.text || segment.kind === "name") continue;
-      hit.excerpt = (hit.quoteWords && snippet(segment.text, terms)) || excerpt(segment.text);
+      hit.excerpt = snippet(segment.text, terms) || excerpt(segment.text);
     }
-    for (const hit of hits) delete hit.quoteWords;
   }
 }

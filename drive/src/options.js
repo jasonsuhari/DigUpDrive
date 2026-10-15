@@ -11,14 +11,15 @@ async function showAccount() {
   $("sign-out").hidden = !account;
 }
 
-function showStatus({ status, items, vectors, failed }) {
+function showStatus({ status, counts, vectors, failed }) {
   const s = status ?? {};
   let text;
   if (s.signedOut) text = "Sign in to start.";
   else if (s.phase === "error") text = `Stopped: ${s.error}`;
   else if (s.phase === "listing") text = `Listing ${s.source === "gmail" ? "Gmail" : "Drive"}… ${formatCount(s.listed ?? 0)} found`;
   else if (s.phase === "indexing") text = `Read ${formatCount(s.done)} of ${formatCount(s.total)}${s.current ? `: ${s.current}` : ""}`;
-  else text = `${formatCount(items ?? s.total ?? 0)} files and emails, ${formatCount(vectors ?? 0)} passages, pages, slides and moments.` +
+  else if (counts?.pending) text = `Read ${formatCount(counts.total - counts.pending)} of ${formatCount(counts.total)} files and emails. Paused or waiting for the next check.`;
+  else text = `${formatCount(counts?.total ?? s.total ?? 0)} files and emails, ${formatCount(vectors ?? 0)} passages, pages, slides and moments.` +
     (s.lastSync ? ` Checked ${new Date(s.lastSync).toLocaleTimeString()}.` : "");
   $("progress-text").textContent = text;
   $("progress").hidden = s.phase !== "indexing";

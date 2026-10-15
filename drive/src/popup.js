@@ -1,4 +1,4 @@
-import { engine, element, onEngine, KIND_LABELS, formatDate, formatCount, marked } from "./ui/common.js";
+import { engine, element, onEngine, KIND_LABELS, KIND_GLYPHS, formatDate, formatCount, marked } from "./ui/common.js";
 
 const FILTERS = [
   ["all", "All", null],
@@ -39,7 +39,7 @@ const kinds = () => FILTERS.find(([key]) => key === filter)[2];
 function thumbnail(item) {
   if (item.thumb) return element("img", { class: "thumb", src: item.thumb, alt: "" });
   if (item.icon) return element("div", { class: "thumb icon" }, element("img", { src: item.icon.replace("/16/", "/64/"), alt: "" }));
-  return element("div", { class: "thumb icon" }, KIND_LABELS[item.kind]?.[0] ?? "·");
+  return element("div", { class: "thumb icon" }, KIND_GLYPHS[item.kind] ?? KIND_LABELS[item.kind]?.[0] ?? "·");
 }
 
 function render(note) {
@@ -134,12 +134,14 @@ input.addEventListener("keydown", (event) => {
 });
 
 async function showProgress() {
-  const { status: s, items } = await engine("status");
+  const { status: s, counts } = await engine("status");
   if (input.value.trim()) return;
   if (s.signedOut || s.error === "signed out") status.replaceChildren("Not signed in. ", element("a", { href: "options.html", target: "_blank" }, "Set up DigUp"));
   else if (s.phase === "listing") status.textContent = `Listing ${s.source === "gmail" ? "Gmail" : "Drive"}… ${formatCount(s.listed ?? 0)}`;
   else if (s.phase === "indexing") status.textContent = `Reading ${formatCount(s.done)} of ${formatCount(s.total)}${s.current ? ` · ${s.current}` : ""}`;
-  else status.textContent = `${formatCount(items)} files and emails`;
+  else status.textContent = counts.pending
+    ? `Read ${formatCount(counts.total - counts.pending)} of ${formatCount(counts.total)} files and emails`
+    : `${formatCount(counts.total)} files and emails`;
 }
 
 onEngine("status", () => showProgress());

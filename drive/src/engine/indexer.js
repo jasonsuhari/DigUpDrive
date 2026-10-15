@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS = {
 const MAX_EMBED_CHARS = 4000;
 const MAX_STORED_CHARS = 20000;
 const IMAGES_PER_STEP = 32;
+const READ_AHEAD = 6;
+const READ_AHEAD_BYTES = 64 * 1024 * 1024;
 
 export async function settings() {
   return { ...DEFAULT_SETTINGS, ...(await getMeta("settings")) };
@@ -184,8 +186,8 @@ export class Indexer {
     return tally;
   }
 
-  next() {
-    const pending = [...this.searcher.items.values()].filter((item) => item.state === "pending");
+  next(skip) {
+    const pending = [...this.searcher.items.values()].filter((item) => item.state === "pending" && !skip.has(item.id));
     if (!pending.length) return null;
     const bySource = { drive: [], gmail: [] };
     for (const item of pending) bySource[item.source].push(item);
@@ -196,11 +198,24 @@ export class Indexer {
   }
 
   async drain() {
-    let item;
     this.report({ phase: "indexing", ...this.counts() });
-    while (!this.paused && (item = this.next())) {
-      this.report({ current: item.name });
-      await this.index(item);
+    const reading = new Map();
+    const bytesReading = () => [...reading.values()].reduce((sum, job) => sum + job.item.size, 0);
+    const fill = () => {
+      while (!this.paused && reading.size < READ_AHEAD) {
+        const item = this.next(reading);
+        if (!item || (reading.size && bytesReading() + item.size > READ_AHEAD_BYTES)) break;
+        reading.set(item.id, { item, started: performance.now(), result: this.readSafely(item) });
+      }
+    };
+    fill();
+    while (reading.size) {
+      const [id, job] = reading.entries().next().value;
+      const read = await job.result;
+      reading.delete(id);
+      fill();
+      this.report({ current: job.item.name });
+      await this.index(job, read);
       this.report({ phase: "indexing", ...this.counts() });
     }
     await releaseIndexingModel();
@@ -214,24 +229,36 @@ export class Indexer {
     return gmail.readEmail(item, account);
   }
 
-  async index(item) {
+  async readSafely(item) {
     const started = performance.now();
-    let read = { pieces: [] };
-    let segments = [];
-    let failure = null;
     try {
-      read = await this.read(item);
-      Object.assign(item, read.update);
-      if (read.children?.length) await this.queue(read.children);
-      segments = await this.embed(item, read.pieces);
+      return { ...(await this.read(item)), readMs: Math.round(performance.now() - started) };
     } catch (error) {
-      if (error instanceof GoogleError && error.status === 401) throw error;
-      if (error instanceof Unreadable) read = { pieces: [], detail: `${error.message}; found by name only` };
-      else failure = error;
-      segments = [];
+      return { pieces: [], error, readMs: Math.round(performance.now() - started) };
+    }
+  }
+
+  async index({ item, started }, read) {
+    let segments = [];
+    let failure = read.error ?? null;
+    const embedStarted = performance.now();
+    try {
+      if (!failure) {
+        Object.assign(item, read.update);
+        if (read.children?.length) await this.queue(read.children);
+        segments = await this.embed(item, read.pieces);
+      }
+    } catch (error) {
+      failure = error;
     } finally {
       read.close?.();
     }
+    if (failure instanceof GoogleError && failure.status === 401) throw failure;
+    if (failure instanceof Unreadable) {
+      read = { pieces: [], detail: `${failure.message}; found by name only` };
+      failure = null;
+    }
+    if (failure) segments = [];
     segments.unshift({ kind: "name", modality: null, loc: null, label: null, text: `${item.name} ${item.path ?? ""}`, vec: null });
     const finished = {
       ...item,
@@ -242,11 +269,12 @@ export class Indexer {
       indexedVersion: item.version,
       seconds: (performance.now() - started) / 1000,
     };
-    console.info(
-      `indexed ${item.kind} "${item.name}": ${finished.state}, ${segments.length} segments, ${finished.seconds.toFixed(1)} s` +
-        (finished.detail ? ` (${finished.detail})` : ""),
-    );
+    const embedMs = Math.round(performance.now() - embedStarted);
     const { removed, written } = await replaceSegments(finished, segments);
+    console.info(
+      `indexed ${item.kind} "${item.name}": ${finished.state}, ${segments.length} segments, read ${read.readMs} ms, ` +
+        `embed ${embedMs} ms${finished.detail ? ` (${finished.detail})` : ""}`,
+    );
     this.searcher.setItem(finished);
     for (const id of removed) this.searcher.removeSegment(id);
     for (const segment of written) this.searcher.addSegment(segment);

@@ -29,6 +29,8 @@ export const KIND_LABELS = {
   email: "Email", other: "File",
 };
 
+export const KIND_GLYPHS = { email: "✉", audio: "♪", video: "▶", pdf: "PDF" };
+
 export const formatCount = (n) => new Intl.NumberFormat().format(n);
 
 export function formatDate(ms) {
